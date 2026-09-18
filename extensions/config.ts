@@ -13,7 +13,6 @@ import type {
   ModelDefinition,
   ClassifierConfig,
   SystemOneClassifierConfig,
-  CodexPoolConfig,
 } from './types';
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_TOKENS } from './constants';
@@ -128,7 +127,6 @@ export const mergeConfig = (
     phaseBias: override.phaseBias ?? base.phaseBias,
     maxSessionBudget: override.maxSessionBudget ?? base.maxSessionBudget,
     rules: override.rules ?? base.rules,
-    codexPool: override.codexPool ?? base.codexPool,
     profiles: mergedProfiles,
     models: Object.keys(mergedModels).length > 0 ? mergedModels : undefined,
   };
@@ -170,59 +168,6 @@ const normalizeSystemOneClassifier = (
   }
 
   return { provider: 'typesafe', type: 'system-one', model, timeoutMs };
-};
-
-const normalizeCodexPool = (
-  value: unknown,
-  warnings: string[],
-  models?: Record<string, ModelDefinition>,
-): CodexPoolConfig | undefined => {
-  if (value === undefined || value === null) return undefined;
-  if (!isObjectRecord(value)) {
-    warnings.push('Ignored invalid Codex pool configuration.');
-    return undefined;
-  }
-
-  const name = typeof value.name === 'string' ? value.name.trim() : '';
-  if (!name) {
-    warnings.push('Ignored Codex pool configuration without a pool name.');
-    return undefined;
-  }
-
-  const rawFallback =
-    typeof value.fallbackModel === 'string' ? value.fallbackModel.trim() : '';
-  if (!rawFallback) {
-    warnings.push(`Ignored Codex pool "${name}" without a fallbackModel.`);
-    return undefined;
-  }
-
-  const fallback = resolveModelRef(rawFallback, models);
-  try {
-    parseCanonicalModelRef(fallback.canonicalRef);
-  } catch (error) {
-    warnings.push(
-      `Ignored Codex pool "${name}": invalid fallbackModel: ${error instanceof Error ? error.message : String(error)}`,
-    );
-    return undefined;
-  }
-
-  const fallbackThinking = isThinkingLevel(value.fallbackThinking)
-    ? value.fallbackThinking
-    : 'high';
-  if (
-    value.fallbackThinking !== undefined &&
-    !isThinkingLevel(value.fallbackThinking)
-  ) {
-    warnings.push(
-      `Codex pool "${name}" has an invalid fallbackThinking level. Defaulting to high.`,
-    );
-  }
-
-  return {
-    name,
-    fallbackModel: fallback.canonicalRef,
-    fallbackThinking,
-  };
 };
 
 export const parseCanonicalModelRef = (
@@ -457,12 +402,6 @@ export const normalizeConfig = (raw: RouterConfig): ConfigLoadResult => {
     warnings,
   );
   const hasModels = Object.keys(normalizedModels).length > 0;
-  const codexPool = normalizeCodexPool(
-    raw.codexPool,
-    warnings,
-    hasModels ? normalizedModels : undefined,
-  );
-
   const normalizedProfiles: Record<string, RouterProfile> = {};
 
   for (const [name, profile] of Object.entries(raw.profiles ?? {})) {
@@ -585,7 +524,6 @@ export const normalizeConfig = (raw: RouterConfig): ConfigLoadResult => {
       phaseBias,
       maxSessionBudget,
       rules: rules.length > 0 ? rules : undefined,
-      codexPool,
       profiles: normalizedProfiles,
       models: hasModels ? normalizedModels : undefined,
     },

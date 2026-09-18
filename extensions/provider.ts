@@ -31,25 +31,12 @@ import {
   THINKING_LEVELS,
   clampThinkingLevel,
 } from './config';
-import {
-  createCodexPoolSelector,
-  loadCodexPoolRoute,
-  type CodexPoolRoute,
-} from './codex-pool';
 import { DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_TOKENS } from './constants';
 const REGISTRY_WAIT_TIMEOUT_MS = 5000;
 const REGISTRY_WAIT_INITIAL_DELAY_MS = 50;
 const REGISTRY_WAIT_MAX_DELAY_MS = 500;
 
 class RoutingCancelledError extends Error {}
-
-interface DelegationTarget {
-  modelRef: string;
-  poolProvider?: string;
-  poolRoute?: CodexPoolRoute;
-  forcedThinking?: ThinkingLevel;
-  isPoolFallback?: boolean;
-}
 
 /**
  * Wait for the model registry to become available with exponential backoff.
@@ -209,7 +196,6 @@ export const registerRouterProvider = (
   },
 ) => {
   const profileList = profileNames(state.currentConfig);
-  const codexPoolSelector = createCodexPoolSelector();
 
   // Map profiles to their capacities
   const modelDefinitions = profileList.map((name) => {
@@ -510,76 +496,11 @@ export const registerRouterProvider = (
               modelsToTry = [decision.targetLabel];
             }
           }
-          const codexPoolRoute = loadCodexPoolRoute(
-            state.currentConfig.codexPool,
-            decision.targetProvider,
-            decision.targetModelId,
-          );
-          const codexPoolPlan = codexPoolRoute
-            ? codexPoolSelector.select(
-                codexPoolRoute,
-                latestMessage?.role === 'toolResult',
-              )
-            : undefined;
-          const poolTargets =
-            codexPoolRoute && codexPoolPlan
-              ? codexPoolPlan.providers.filter((provider) => {
-                  const candidate = registry.find(
-                    provider,
-                    decision.targetModelId,
-                  );
-                  return Boolean(
-                    candidate &&
-                    (!imageAttached || candidate.input?.includes('image')),
-                  );
-                })
-              : [];
-          const useCodexPool = poolTargets.length > 0;
-          const usePoolFallback = Boolean(
-            codexPoolRoute &&
-            !useCodexPool &&
-            (codexPoolRoute.allConfiguredMembersExhausted ||
-              codexPoolPlan?.allMembersExhausted),
-          );
-          const delegationTargets: DelegationTarget[] =
-            useCodexPool && codexPoolRoute
-              ? [
-                  ...poolTargets.map((provider) => ({
-                    modelRef: `${provider}/${decision.targetModelId}`,
-                    poolProvider: provider,
-                    poolRoute: codexPoolRoute,
-                  })),
-                  {
-                    modelRef: codexPoolRoute.fallbackModel,
-                    poolRoute: codexPoolRoute,
-                    forcedThinking: codexPoolRoute.fallbackThinking,
-                    isPoolFallback: true,
-                  },
-                  ...modelsToTry.slice(1).map((modelRef) => ({ modelRef })),
-                ]
-              : usePoolFallback && codexPoolRoute
-                ? [
-                    {
-                      modelRef: codexPoolRoute.fallbackModel,
-                      poolRoute: codexPoolRoute,
-                      forcedThinking: codexPoolRoute.fallbackThinking,
-                      isPoolFallback: true,
-                    },
-                    ...modelsToTry.slice(1).map((modelRef) => ({ modelRef })),
-                  ]
-                : modelsToTry.map((modelRef) => ({ modelRef }));
-          const seenModelRefs = new Set<string>();
-          const uniqueDelegationTargets = delegationTargets.filter((target) => {
-            if (seenModelRefs.has(target.modelRef)) return false;
-            seenModelRefs.add(target.modelRef);
-            return true;
-          });
           let lastError: unknown;
           let success = false;
 
-          for (let i = 0; i < uniqueDelegationTargets.length; i++) {
-            const delegationTarget = uniqueDelegationTargets[i];
-            const { modelRef } = delegationTarget;
+          for (let i = 0; i < modelsToTry.length; i++) {
+            const modelRef = modelsToTry[i];
             const { provider: targetProvider, modelId: targetModelId } =
               parseCanonicalModelRef(modelRef);
 
@@ -622,16 +543,9 @@ export const registerRouterProvider = (
                 model.id,
                 decision.tier,
               );
-              let requestedReasoning =
-                delegationTarget.forcedThinking ??
-                thinkingOverride ??
-                decision.thinking;
+              let requestedReasoning = thinkingOverride ?? decision.thinking;
 
-              if (
-                !delegationTarget.forcedThinking &&
-                requestedReasoning !== 'off' &&
-                targetModel.reasoning
-              ) {
+              if (requestedReasoning !== 'off' && targetModel.reasoning) {
                 const tierConfig = profile[decision.tier];
                 if (tierConfig?.resolvedThinkingLevels) {
                   requestedReasoning = clampThinkingLevel(
@@ -705,34 +619,10 @@ export const registerRouterProvider = (
                 stream.push(event);
               }
               success = true;
-              if (delegationTarget.poolProvider && delegationTarget.poolRoute) {
-                codexPoolSelector.commit(
-                  delegationTarget.poolRoute,
-                  delegationTarget.poolProvider,
-                );
-                decision.reasoning =
-                  `${decision.reasoning} (Codex pool ${delegationTarget.poolRoute.name}: ` +
-                  `${delegationTarget.poolProvider}/${targetModelId}.)`;
-              }
-              if (i > 0 || delegationTarget.isPoolFallback) {
-                decision.isFallback = true;
-              }
-              if (delegationTarget.isPoolFallback) {
-                decision.reasoning = `with ${delegationTarget.forcedThinking} thinking.)`;
-                `${decision.reasoning} (Codex pool ${delegationTarget.poolRoute?.name ?? 'unavailable'} ` +
-                  `unavailable; used ${modelRef} with ${delegationTarget.forcedThinking} thinking.)`;
-                `with ${delegationTarget.forcedThinking} thinking.)`;
-              }
+              if (i > 0) decision.isFallback = true;
               break;
             } catch (err) {
               lastError = err;
-              if (delegationTarget.poolProvider && delegationTarget.poolRoute) {
-                codexPoolSelector.markExhausted(
-                  delegationTarget.poolRoute,
-                  delegationTarget.poolProvider,
-                  err instanceof Error ? err.message : String(err),
-                );
-              }
             }
           }
 

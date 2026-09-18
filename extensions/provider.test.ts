@@ -20,15 +20,6 @@ import type {
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import type { RouterConfig, RoutingDecision, RouterTier } from './types';
 
-const { codexPoolMocks } = vi.hoisted(() => ({
-  codexPoolMocks: {
-    loadRoute: vi.fn(),
-    select: vi.fn(),
-    commit: vi.fn(),
-    markExhausted: vi.fn(),
-  },
-}));
-
 interface MockEvent {
   type: string;
   delta?: string;
@@ -52,15 +43,6 @@ vi.mock('@earendil-works/pi-ai', () => ({
 
 vi.mock('@earendil-works/pi-ai/compat', () => ({
   streamSimple: vi.fn(),
-}));
-
-vi.mock('./codex-pool', () => ({
-  createCodexPoolSelector: () => ({
-    select: codexPoolMocks.select,
-    commit: codexPoolMocks.commit,
-    markExhausted: codexPoolMocks.markExhausted,
-  }),
-  loadCodexPoolRoute: codexPoolMocks.loadRoute,
 }));
 
 type ProviderState = Parameters<typeof registerRouterProvider>[1];
@@ -104,7 +86,6 @@ describe('provider.ts', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    codexPoolMocks.loadRoute.mockReturnValue(undefined);
     registeredProviderName = null;
     registeredProviderOptions = null;
 
@@ -497,73 +478,6 @@ describe('provider.ts', () => {
       expect(callCount).toBe(2);
       expect(mockState.accumulatedCost).toBe(0.0005);
       expect(mockState.lastDecision!.isFallback).toBe(true);
-    });
-
-    it('tries every eligible Codex pool member before high-effort Grok', async () => {
-      mockState.currentConfig.codexPool = {
-        name: 'finc',
-        fallbackModel: 'cursor/grok-4.6',
-        fallbackThinking: 'high',
-      };
-      mockState.currentConfig.profiles.balanced.medium = {
-        model: 'openai-codex/gpt-5.6-terra',
-        thinking: 'medium',
-      };
-      mockState.currentModelRegistry!.find = (
-        provider: string,
-        modelId: string,
-      ) =>
-        ({
-          provider,
-          id: modelId,
-          reasoning: true,
-          input: ['text'] as const,
-        }) as unknown as Model<Api>;
-      codexPoolMocks.loadRoute.mockReturnValue({
-        name: 'finc',
-        modelId: 'gpt-5.6-terra',
-        members: ['openai-codex-2', 'openai-codex-3'],
-        allConfiguredMembersExhausted: false,
-        fallbackModel: 'cursor/grok-4.6',
-        fallbackThinking: 'high',
-      });
-      codexPoolMocks.select.mockReturnValue({
-        providers: ['openai-codex-2', 'openai-codex-3'],
-        allMembersExhausted: false,
-      });
-      vi.mocked(streamSimple).mockImplementation((model: Model<Api>) => {
-        if (model.provider.startsWith('openai-codex')) {
-          return (async function* () {
-            throw new Error('The usage limit has been reached');
-          })() as unknown as ReturnType<typeof streamSimple>;
-        }
-        return (async function* () {
-          yield { type: 'text_delta', delta: 'Grok answer' };
-        })() as unknown as ReturnType<typeof streamSimple>;
-      });
-
-      registerRouterProvider(mockPi, mockState, mockActions);
-      mockState.pinnedTierByProfile.balanced = 'medium';
-      const model = {
-        id: 'balanced',
-        api: 'router-api' as Api,
-        provider: 'router',
-      } as unknown as Model<Api>;
-      const context = {
-        messages: [{ role: 'user', content: 'write code' }],
-      } as unknown as Context;
-
-      registeredProviderOptions!.streamSimple(model, context);
-      await new Promise((resolve) => setTimeout(resolve, 100));
-
-      expect(streamSimple).toHaveBeenCalledTimes(3);
-      expect(vi.mocked(streamSimple).mock.calls[2][0]).toMatchObject({
-        provider: 'cursor',
-        id: 'grok-4.6',
-      });
-      expect(vi.mocked(streamSimple).mock.calls[2][2]?.reasoning).toBe('high');
-      expect(codexPoolMocks.markExhausted).toHaveBeenCalledTimes(2);
-      expect(mockState.lastDecision?.isFallback).toBe(true);
     });
 
     it('should preserve previous Google model on Google thinking tool continuation', async () => {

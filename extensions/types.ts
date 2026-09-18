@@ -34,16 +34,6 @@ export interface SystemOneClassifierConfig {
   timeoutMs: number;
 }
 
-/**
- * Local bridge configuration for a pi-codex-multi pool. The router keeps the
- * selected Codex model and thinking level while choosing a pool member.
- */
-export interface CodexPoolConfig {
-  name: string;
-  fallbackModel: string;
-  fallbackThinking: ThinkingLevel;
-}
-
 export interface RoutedTierConfig {
   model: string;
   thinking?: ThinkingLevel;
@@ -74,7 +64,6 @@ export interface RouterConfig {
   phaseBias?: number;
   maxSessionBudget?: number;
   rules?: RoutingRule[];
-  codexPool?: CodexPoolConfig;
   profiles: Record<string, RouterProfile>;
   models?: Record<string, ModelDefinition>;
 }
