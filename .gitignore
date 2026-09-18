@@ -1,0 +1,5 @@
+.pi/
+.antigravitycli/
+node_modules
+router-debug.log
+docs/plans/

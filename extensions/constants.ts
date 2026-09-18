@@ -1,0 +1,3 @@
+export const MAX_DEBUG_HISTORY = 12;
+export const DEFAULT_CONTEXT_WINDOW = 128_000;
+export const DEFAULT_MAX_TOKENS = 16_384;
